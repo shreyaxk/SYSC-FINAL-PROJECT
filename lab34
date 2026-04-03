@@ -1,0 +1,118 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import butter, filtfilt, find_peaks
+from scipy.fft import fft, fftfreq
+import pandas as pd
+#please ensure we have all these libraries 
+# (im pretty sure we do, i did see them. But just in case)
+FILENAME = "ECG_Signal_clean.csv"
+
+#Data loading, this would have to be modified (integrate into data loader maybe?)
+def load_csv(filename):
+    df = pd.read_csv(filename)
+    df = df.apply(pd.to_numeric, errors='coerce').dropna()
+
+    if df.shape[1] < 2:
+        raise ValueError("CSV must have at least 2 columns (time + signal)")
+
+    headers = list(df.columns)
+    data = df.to_numpy()
+
+    t = data[:, 0]
+    signal = data[:, 1]
+
+    dt = np.diff(t)
+    fs = 1 / np.mean(dt)
+
+    return t, signal, fs, headers
+
+
+#FILTER: INTEGRATE THIS, I USED THE LAB 3/4 FORMAT
+def bandpass_filter(signal, fs, lowcut=0.05, highcut=40, order=2):
+    nyq = 0.5 * fs
+
+    low = lowcut / nyq
+    high = min(highcut / nyq, 0.99)
+
+    b, a = butter(order, [low, high], btype='band')
+    filtered = filtfilt(b, a, signal)
+    filtered = filtered - np.mean(filtered)
+
+    return filtered
+
+
+# FFT, our main issue w the old one is that we had a DC component, 
+# idk if you've taken 3501 yet DC comp = 0, but I lowered the filter order to 2
+def compute_fft(signal, fs):
+    N = len(signal)
+    fft_vals = np.abs(fft(signal)) / N
+    freqs = fftfreq(N, 1/fs)
+
+    mask = freqs >= 0
+    return freqs[mask], fft_vals[mask]
+
+
+# Peak detection, from lab 3, will put a lil red dot on the r-peaks 
+def detect_r_peaks(signal, fs):
+    threshold = 0.5 * np.std(signal)
+
+    peaks, _ = find_peaks(
+        signal,
+        distance=int(0.5 * fs),  
+        prominence=threshold
+    )
+    return peaks
+
+
+def compute_heart_rate(peaks, t):
+    rr = np.diff(t[peaks])
+    hr = 60 / rr
+    return hr, np.mean(hr)
+
+
+# 
+def process_ecg_file(filename):
+    t, signal, fs, headers = load_csv(filename)
+
+    print("Columns in file:", headers)
+    print("Using column:", headers[1])
+    print("Sampling frequency:", fs)
+
+    # Filter
+    filtered = bandpass_filter(signal, fs)
+
+    # FFT
+    freqs_raw, fft_raw = compute_fft(signal, fs)
+    freqs_filt, fft_filt = compute_fft(filtered, fs)
+
+    # Peaks
+    peaks = detect_r_peaks(filtered, fs)
+    hr, avg_hr = compute_heart_rate(peaks, t)
+
+#PLOT FOR TESTING PURPOSES 
+    plt.figure(figsize=(10,4))
+    plt.plot(t, signal, label="Raw", alpha=0.6)
+    plt.plot(t, filtered, label="Filtered", linewidth=2)
+    plt.scatter(t[peaks], filtered[peaks], color='red', label="R Peaks")
+    plt.legend()
+    plt.title("ECG Signal Processing")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Amplitude")
+    plt.grid(True)
+    plt.show()
+
+    plt.figure(figsize=(10,4))
+    plt.plot(freqs_raw, fft_raw, label="Raw FFT", alpha=0.6)
+    plt.plot(freqs_filt, fft_filt, label="Filtered FFT", linewidth=2)
+    plt.legend()
+    plt.title("Frequency Spectrum")
+    plt.xlabel("Frequency (Hz)")
+    plt.ylabel("Amplitude")
+
+    plt.show()
+
+    print("Average Heart Rate:", avg_hr)
+
+
+#RUN (THIS IS FOR TEST PURPOSES ONLY)
+process_ecg_file(FILENAME)
